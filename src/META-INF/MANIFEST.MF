@@ -1,0 +1,16 @@
+Name: STATS LINEAR ELASTIC NET REGRESSION
+Display-Name: Linear Elastic Net Regression
+Dialog-Specs: dialogLENR.cfe
+Code-Files: lenr_wrapper.py
+Misc-Files: LENR-properties.json
+Summary: Fits linear elastic net regression models using Python sklearn classes.
+Description: Fits regularized linear regression models combining L1 and L2 loss penalties using the Python sklearn.linear_model.ElasticNet class for a dependent variable on one or more independent variables, and includes optional modes to display trace plots and to select L1 ratio and alpha hyperparameter values based on crossvalidation.
+Author: Statistics, IBM SPSS
+Version: 1.0.0
+Product-Version: 29.0.0.0
+Date: 03/07/2022
+Platforms: Windows, MacOS
+Plugins: Python
+Python-Version: 3
+Python-Modules: sklearn
+Translation-Catalogues: intl
