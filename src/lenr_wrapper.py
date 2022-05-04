@@ -128,7 +128,8 @@ def execute(iterator_id, data_model, settings, lang="en"):
             elif mode == "CROSSVALID":
                 nfolds = get_value("criteria_nfolds")
                 state = get_value("criteria_state")
-                process_cv(x_array, y_array, w, nfolds, state, ratios, alphas, training_indices, holdout_indices, result)
+                process_cv(x_array, y_array, w, nfolds, state, ratios, alphas, training_indices,
+                           holdout_indices, result)
 
                 if is_set("save_pred") or is_set("save_resid"):
                     pred = get_value("save_pred") if is_set("save_pred") else None
@@ -662,6 +663,8 @@ def create_cv_output(y, x_names, x_fnotes, y_name, nfolds, alphas, intl, output_
                                                            intl, result)
     output_json.add_table(elnet_regression_table)
 
+    """ Add the Model Comparisons Table """
+
     print_value = get_value("print").lower()
     is_compare = "compare" == print_value
     is_verbose = "verbose" == print_value
@@ -676,22 +679,43 @@ def create_cv_output(y, x_names, x_fnotes, y_name, nfolds, alphas, intl, output_
         model_comparisons_table.set_default_cell_format(decimals=3)
         model_comparisons_table.set_max_data_column_width(140)
 
-        table_data = [result["mean_r2"], result["ratio_out"], result["alpha_out"], result["mean_mse"]]
+        table_data = [result["ratio_out"], result["alpha_out"], result["mean_r2"], result["mean_mse"]]
         if not is_compare:
             """Transpose these lists"""
-            mse_transposed = np.array(result["mse_out"]).T.tolist()
             r2_transposed = np.array(result["r2_out"]).T.tolist()
-            for mse_new in mse_transposed:
-                table_data.append(mse_new)
             for r2_new in r2_transposed:
                 table_data.append(r2_new)
 
-        model_comparisons_table.add_row_dimensions(intl.loadstring("ratio"),
-                                                   descendants=table_data.pop(1))
-        model_comparisons_table.add_row_dimensions(intl.loadstring("alpha"),
-                                                   descendants=table_data.pop(2))
+            #  Put the mean_mse column after the r2 values
+            mean_mse = table_data.pop(3)
+            table_data.append(mean_mse)
+            mse_transposed = np.array(result["mse_out"]).T.tolist()
+            for mse_new in mse_transposed:
+                table_data.append(mse_new)
 
-        model_comparisons_table_columns = []
+        """Get the sort descending ([::-1]) index of the mean_r2 values, and apply it to each row in the table_data"""
+        sort_index = np.argsort(result["mean_r2"])[::-1]
+        sorted_table_data = []
+        for cur_row in table_data:
+            new_row = []
+            for new_idx in range(len(sort_index)):
+                new_row.append(cur_row[sort_index[new_idx]])
+            sorted_table_data.append(new_row)
+
+        model_comparisons_table.set_cells(sorted_table_data)
+        model_comparisons_table.transpose_cells()
+
+        """Create a row for each entry in the l1_ratio list"""
+        model_comparisons_table_rows = []
+        for ratio_idx in range(len(table_data[0])):
+            model_comparisons_table_rows.append(ratio_idx)
+
+        model_comparisons_table.add_row_dimensions(intl.loadstring("ratio"),
+                                                   True,
+                                                   model_comparisons_table_rows,
+                                                   False)
+
+        model_comparisons_table_columns = [intl.loadstring("ratio"), intl.loadstring("alpha")]
         if is_compare:
             model_comparisons_table_columns.append(intl.loadstring("average_test_subset_r2"))
             model_comparisons_table_columns.append(intl.loadstring("average_test_subset_mse"))
@@ -708,19 +732,12 @@ def create_cv_output(y, x_names, x_fnotes, y_name, nfolds, alphas, intl, output_
                                                       False,
                                                       model_comparisons_table_columns)
 
-        table_data_cells = list(zip(*table_data))
-        if is_compare:
-            model_comparisons_table.set_cells([table_data_cells])
-        else:
-            model_comparisons_table.set_cells([table_data_cells])
-
         model_comparisons_table.add_footnotes(intl.loadstring("dependent_variable").format(y_name))
         model_comparisons_table.add_footnotes(intl.loadstring("model").format(", ".join(x_fnotes)))
         if is_compare:
             model_comparisons_table.add_footnotes(intl.loadstring("nfolds_with_n").format(nfolds))
 
-        """Comment out until it is ready to test"""
-        """output_json.add_table(model_comparisons_table)"""
+        output_json.add_table(model_comparisons_table)
 
     if get_value("plot_observed"):
         observed_chart = create_scatter_plot(intl.loadstring("dependent_by_predicted_value").format(y_name),
