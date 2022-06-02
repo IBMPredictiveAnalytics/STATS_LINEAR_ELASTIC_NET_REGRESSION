@@ -35,7 +35,7 @@ def execute(iterator_id, data_model, settings, lang="en"):
 
     intl = get_lang_resource(lang)
 
-    def execute_lenr(data):
+    def execute_model(data):
         if data is not None:
             case_count = len(data)
         else:
@@ -149,32 +149,43 @@ def execute(iterator_id, data_model, settings, lang="en"):
             generate_output(output_json.get_json(), None)
             finish()
 
-    get_records(iterator_id, data_model, execute_lenr)
+    get_records(iterator_id, data_model, execute_model)
     return 0
 
 
+# process for fit mode
+# x: matrix of factors and covariates data which pass by Stats backend
+# y: dependent variable data which pass by Stats backend
+# swt: weight variable data which pass by Stats backend, it is None if no weight variable
+# ratios: single L1 ratio value, For example: 1.0
+# alphas: single alpha value, For example: 1.0
+# t_indices: index list if partition=1
+# h_indices: index list if partition=3
+# result: A map to save the calculation results
 def process_fit(x, y, swt, ratios, alphas, t_indices, h_indices, result):
     scaler = int_out = None
+    # Get x_train, y_train and swt_train from the original data based on t_indices
     x_train, y_train, swt_train = get_train_group(x, y, swt, t_indices)
 
     # Get copy of original x, possibly to be scaled
     x_scaled = x
 
+    # Calculate the mean, std, etc base on the template
     if standardize:
         scaler = StandardScaler()
         x_train = scaler.fit_transform(x_train, sample_weight=swt_train)
         x_scaled = scaler.fit_transform(x_scaled, sample_weight=swt)
 
-    lenr = ElasticNet(l1_ratio=ratios, alpha=alphas, fit_intercept=intercept, max_iter=100000)
-    lenr.fit(x_train, y_train, swt_train)
+    linear_model1 = ElasticNet(l1_ratio=ratios, alpha=alphas, fit_intercept=intercept, max_iter=100000)
+    linear_model1.fit(x_train, y_train, swt_train)
 
-    r2_train = lenr.score(x_train, y_train, swt_train)
+    r2_train = linear_model1.score(x_train, y_train, swt_train)
     result["r2_train"] = r2_train
-    bout = lenr.coef_
+    bout = linear_model1.coef_
     result["bout"] = bout
 
     if intercept:
-        int_out = lenr.intercept_
+        int_out = linear_model1.intercept_
         result["int_out"] = int_out
 
     if standardize:
@@ -188,12 +199,13 @@ def process_fit(x, y, swt, ratios, alphas, t_indices, h_indices, result):
             raw_int_out = int_out - np.dot(raw_bout, mean_out)
             result["raw_int_out"] = raw_int_out
 
-    train_pred = lenr.predict(x_train)
+    train_pred = linear_model1.predict(x_train)
     train_resid = y_train - train_pred
 
     result["train_pred"] = train_pred.tolist()
     result["train_resid"] = train_resid.tolist()
 
+    # Get x_holdout, y_holdout and hswt from the original data based on h_indices
     if holdout:
         x_holdout = x[h_indices]
         y_holdout = y[h_indices]
@@ -201,16 +213,17 @@ def process_fit(x, y, swt, ratios, alphas, t_indices, h_indices, result):
 
         if standardize:
             x_holdout = scaler.transform(x_holdout)
-        r2_holdout = lenr.score(x_holdout, y_holdout, hswt)
+        r2_holdout = linear_model1.score(x_holdout, y_holdout, hswt)
         result["r2_holdout"] = r2_holdout
 
-        holdout_pred = lenr.predict(x_holdout)
+        holdout_pred = linear_model1.predict(x_holdout)
         holdout_resid = y_holdout - holdout_pred
 
         result["holdout_pred"] = holdout_pred.tolist()
         result["holdout_resid"] = holdout_resid.tolist()
 
-    pred = lenr.predict(x_scaled)
+    # Calculate the save predicted and residuals value using the original x and y data
+    pred = linear_model1.predict(x_scaled)
     resid = y - pred
 
     result["pred_values"] = pred.tolist()
@@ -271,6 +284,7 @@ def process_cv(x, y, swt, nfolds, state, ratios, alphas, t_indices, h_indices, r
                 x_val = scaler.transform(x_val)
                 model = ElasticNet(l1_ratio=ratio, alpha=alpha, fit_intercept=intercept, max_iter=100000)
                 model.fit(x_train, y_train, sample_weight=swt_train)
+
                 y_pred_val = model.predict(x_val).reshape(-1, )
                 mse.append(mean_squared_error(y_val, y_pred_val, sample_weight=swt_val))
                 r2.append(r2_score(y_val, y_pred_val, sample_weight=swt_val))
@@ -284,9 +298,9 @@ def process_cv(x, y, swt, nfolds, state, ratios, alphas, t_indices, h_indices, r
     result["ratio_out"] = ratio_out
     result["alpha_out"] = alpha_out
     result["mse_out"] = mse_out
+    result["r2_out"] = r2_out
     result["mean_mse"] = mean_mse
     result["mean_r2"] = mean_r2
-    result["r2_out"] = r2_out
 
     best_mean_r2 = max(mean_r2)
     best_index = mean_r2.index(best_mean_r2)
@@ -361,13 +375,13 @@ def create_scatter_plot(title, x_label, x_data, y_label, y_data):
     return scatter_chart
 
 
-def create_elnet_regression_table(ratio, alpha, x_names, y_name, intl, result):
-    elnet_regression_table = Table(intl.loadstring("elnet_regression_coefficients"))
-    elnet_regression_table.update_title(footnote_refs=[0])
-    elnet_regression_table.set_default_cell_format(decimals=3)
-    elnet_regression_table.set_max_data_column_width(140)
+def create_regression_table(ratio, alpha, x_names, y_name, intl, result):
+    regression_table = Table(intl.loadstring("regression_coefficients"), "Elastic Net Regression Coefficients")
+    regression_table.update_title(footnote_refs=[0])
+    regression_table.set_default_cell_format(decimals=3)
+    regression_table.set_max_data_column_width(140)
 
-    elnet_regression_table_columns = []
+    regression_table_columns = []
 
     if standardize:
         # Add the "Standardizing Values" group and it's "Mean" and "Std. Dev." categories
@@ -377,30 +391,30 @@ def create_elnet_regression_table(ratio, alpha, x_names, y_name, intl, result):
         standardizing_std_dev_category = Table.Cell(intl.loadstring("std_dev"))
         standardizing_group.add_descendants([standardizing_mean_category.get_value(),
                                              standardizing_std_dev_category.get_value()])
-        elnet_regression_table_columns.append(standardizing_group.get_value())
+        regression_table_columns.append(standardizing_group.get_value())
 
         # Add the "Standardized Coefficients column
         standardizing_coefficients_category = Table.Cell(intl.loadstring("standardized_coefficients"))
-        elnet_regression_table_columns.append(standardizing_coefficients_category.get_value())
+        regression_table_columns.append(standardizing_coefficients_category.get_value())
 
     # Add the "Unstandardized Coefficients column
     unstandardizing_coefficients_cell = Table.Cell(intl.loadstring("unstandardized_coefficients"))
-    elnet_regression_table_columns.append(unstandardizing_coefficients_cell.get_value())
+    regression_table_columns.append(unstandardizing_coefficients_cell.get_value())
 
     # Create the column dimension
-    elnet_regression_table.add_column_dimensions(intl.loadstring("statistics"),
+    regression_table.add_column_dimensions(intl.loadstring("statistics"),
                                                  False,
-                                                 elnet_regression_table_columns)
+                                                 regression_table_columns)
 
     # Add the "Ratio" dimension.  There is only one row category, the alpha value
-    elnet_regression_table_ratio_rows = []
+    regression_table_ratio_rows = []
     rows_ratio_category = Table.Cell(ratio)
-    elnet_regression_table_ratio_rows.append(rows_ratio_category.get_value())
-    elnet_regression_table.add_row_dimensions(intl.loadstring("ratio"),
-                                              descendants=elnet_regression_table_ratio_rows)
+    regression_table_ratio_rows.append(rows_ratio_category.get_value())
+    regression_table.add_row_dimensions(intl.loadstring("ratio"),
+                                              descendants=regression_table_ratio_rows)
 
     # Add the "Alpha" dimension
-    elnet_regression_table_alpha_rows = []
+    regression_table_alpha_rows = []
     alpha_group = Table.Cell(alpha)
 
     if intercept:
@@ -413,9 +427,9 @@ def create_elnet_regression_table(ratio, alpha, x_names, y_name, intl, result):
         rows_predictor_cell = Table.Cell(name)
         alpha_group.add_descendants(rows_predictor_cell.get_value())
 
-    elnet_regression_table_alpha_rows.append(alpha_group.get_value())
-    elnet_regression_table.add_row_dimensions(intl.loadstring("alpha"),
-                                              descendants=elnet_regression_table_alpha_rows)
+    regression_table_alpha_rows.append(alpha_group.get_value())
+    regression_table.add_row_dimensions(intl.loadstring("alpha"),
+                                              descendants=regression_table_alpha_rows)
 
     inner_row_data = []
     if intercept:
@@ -442,19 +456,19 @@ def create_elnet_regression_table(ratio, alpha, x_names, y_name, intl, result):
 
         inner_row_data.append(predictor_row)
 
-    elnet_regression_table.set_cells([inner_row_data])
+    regression_table.set_cells([inner_row_data])
 
-    elnet_regression_table.add_footnotes(intl.loadstring("dependent_variable").format(y_name))
+    regression_table.add_footnotes(intl.loadstring("dependent_variable").format(y_name))
     if standardize:
-        elnet_regression_table.add_footnotes(intl.loadstring("footnotes_1"))
+        regression_table.add_footnotes(intl.loadstring("footnotes_1"))
     if intercept:
-        elnet_regression_table.add_footnotes(intl.loadstring("footnotes_2"))
+        regression_table.add_footnotes(intl.loadstring("footnotes_2"))
 
-    return elnet_regression_table
+    return regression_table
 
 
 def create_fit_output(y, x_names, x_fnotes, y_name, ratios, alphas, intl, output_json, result):
-    model_summary_table = Table(intl.loadstring("model_summary"))
+    model_summary_table = Table(intl.loadstring("model_summary"), "Model Summary")
     model_summary_table.update_title(footnote_refs=[0, 1])
     model_summary_table.set_default_cell_format(decimals=3)
     model_summary_table.set_max_data_column_width(140)
@@ -481,8 +495,8 @@ def create_fit_output(y, x_names, x_fnotes, y_name, ratios, alphas, intl, output
 
     output_json.add_table(model_summary_table)
 
-    elnet_regression_table = create_elnet_regression_table(ratios[0], alphas[0], x_names, y_name, intl, result)
-    output_json.add_table(elnet_regression_table)
+    regression_table = create_regression_table(ratios[0], alphas[0], x_names, y_name, intl, result)
+    output_json.add_table(regression_table)
 
     if get_value("plot_observed"):
         observed_chart = create_scatter_plot(intl.loadstring("dependent_by_predicted_value").format(y_name),
@@ -538,7 +552,7 @@ def create_fit_output(y, x_names, x_fnotes, y_name, ratios, alphas, intl, output
 
 
 def create_trace_output(x_names, x_fnotes, alphas, intl, output_json, result):
-    elnet_regression_line_chart = GplChart(intl.loadstring("elnet_regression_line_chart_title"))
+    regression_line_chart = GplChart(intl.loadstring("regression_line_chart_title"))
 
     graph_dataset = "graphdataset"
 
@@ -567,7 +581,7 @@ def create_trace_output(x_names, x_fnotes, alphas, intl, output_json, result):
            "DATA: color=col(source(s), name(\"color\"), unit.category())",
            "GUIDE: axis(dim(1), label(\"{0}\"))".format(intl.loadstring("alpha")),
            "GUIDE: axis(dim(2), label(\"{0}\"))".format(intl.loadstring("predictor_coefficients")),
-           "GUIDE: text.title(label(\"{0}\"))".format(intl.loadstring("elnet_regression_line_chart_title")),
+           "GUIDE: text.title(label(\"{0}\"))".format(intl.loadstring("regression_line_chart_title")),
            "GUIDE: text.footnote(label(\"{0}\"))".format(intl.loadstring("training_data")),
            "GUIDE: text.subfootnote(label(\"{0}\"))".format(sub_footnote),
            "SCALE: {0}".format(scale),
@@ -575,7 +589,7 @@ def create_trace_output(x_names, x_fnotes, alphas, intl, output_json, result):
            "SCALE: cat(aesthetic(aesthetic.color.interior))",
            "ELEMENT: {0}(position(x*y), color.interior(color))".format(chart_type)]
 
-    elnet_regression_line_chart.add_gpl_statement(gpl)
+    regression_line_chart.add_gpl_statement(gpl)
 
     lines = len(x_names)
 
@@ -585,10 +599,10 @@ def create_trace_output(x_names, x_fnotes, alphas, intl, output_json, result):
 
     color_data = x_names * len(alphas)
 
-    elnet_regression_line_chart.add_variable_mapping("x", x_axis_data, graph_dataset)
-    elnet_regression_line_chart.add_variable_mapping("y", y_axis_data, graph_dataset)
-    elnet_regression_line_chart.add_variable_mapping("color", color_data, graph_dataset)
-    output_json.add_chart(elnet_regression_line_chart)
+    regression_line_chart.add_variable_mapping("x", x_axis_data, graph_dataset)
+    regression_line_chart.add_variable_mapping("y", y_axis_data, graph_dataset)
+    regression_line_chart.add_variable_mapping("color", color_data, graph_dataset)
+    output_json.add_chart(regression_line_chart)
 
     mse_line_chart = Chart(intl.loadstring("mse_line_chart_title"))
     if num_points < 2:
@@ -623,7 +637,7 @@ def create_trace_output(x_names, x_fnotes, alphas, intl, output_json, result):
 
 
 def create_cv_output(y, x_names, x_fnotes, y_name, nfolds, alphas, intl, output_json, result):
-    best_model_summary_table = Table(intl.loadstring("best_model_summary"))
+    best_model_summary_table = Table(intl.loadstring("best_model_summary"), "Best Model Summary")
     best_model_summary_table.update_title(footnote_refs=[0, 1, 2])
     best_model_summary_table.set_default_cell_format(decimals=3)
     best_model_summary_table.set_max_data_column_width(140)
@@ -659,9 +673,9 @@ def create_cv_output(y, x_names, x_fnotes, y_name, nfolds, alphas, intl, output_
 
     output_json.add_table(best_model_summary_table)
 
-    elnet_regression_table = create_elnet_regression_table(result["best_ratio"], result["best_alpha"], x_names, y_name,
+    regression_table = create_regression_table(result["best_ratio"], result["best_alpha"], x_names, y_name,
                                                            intl, result)
-    output_json.add_table(elnet_regression_table)
+    output_json.add_table(regression_table)
 
     """ Add the Model Comparisons Table """
 
@@ -670,7 +684,7 @@ def create_cv_output(y, x_names, x_fnotes, y_name, nfolds, alphas, intl, output_
     is_verbose = "verbose" == print_value
 
     if is_compare or is_verbose:
-        model_comparisons_table = Table(intl.loadstring("model_comparisons"))
+        model_comparisons_table = Table(intl.loadstring("model_comparisons"), "Model Comparisons")
         if is_compare:
             footnote_refs = list(range(3))
         else:
@@ -791,16 +805,35 @@ def create_cv_output(y, x_names, x_fnotes, y_name, nfolds, alphas, intl, output_
 
             output_json.add_chart(holdout_chart)
 
+    metric = get_value("alpha_metric") if is_set("alpha_metric") else None
+    if metric == "LG10":
+        scale = "log(dim(1), base(10))"
+        x_scale = Chart.Scale.Log
+    else:
+        scale = "linear(dim(1))"
+        x_scale = Chart.Scale.Linear
+
     if get_value("plot_mse"):
+        # Create data for plotting varying alpha for best value of ratio.
+        plotdata = np.column_stack((result["ratio_out"], result["alpha_out"], result["mse_out"]))
+        # Extract only the lines that have a ratio that matches the best ratio value
+        plotdata = plotdata[np.where(plotdata[:, 0] == result["best_ratio"])]
+
         average_mse_chart = Chart(intl.loadstring("average_mse_line_chart_title"))
         average_mse_chart.set_type(Chart.Type.Line)
         average_mse_chart.set_x_axis_label(intl.loadstring("alpha"))
-        average_mse_chart.set_x_axis_data(alphas)
+        average_mse_chart.set_x_axis_data(list(plotdata[:,1]))
         average_mse_chart.set_y_axis_label(intl.loadstring("average_mse"))
-        average_mse_chart.set_y_axis_data(result["mean_mse"])
+        average_mse_chart.set_y_axis_data(list(plotdata[:,2]))
+        average_mse_chart.set_x_axis_scale(x_scale)
         output_json.add_chart(average_mse_chart)
 
     if get_value("plot_r2"):
+        # Create data for plotting varying alpha for best value of ratio.
+        plotdata = np.column_stack((result["ratio_out"], result["alpha_out"], result["r2_out"]))
+        # Extract only the lines that have a ratio that matches the best ratio value
+        plotdata = plotdata[np.where(plotdata[:, 0] == result["best_ratio"])]
+
         average_r2_chart = GplChart(intl.loadstring("average_r2_line_chart_title"))
         graph_dataset = "graphdataset"
 
@@ -810,11 +843,12 @@ def create_cv_output(y, x_names, x_fnotes, y_name, nfolds, alphas, intl, output_
                "GUIDE: axis(dim(1), label(\"{0}\"))".format(intl.loadstring("alpha")),
                "GUIDE: axis(dim(2), label(\"{0}\"))".format(intl.loadstring("average_r2")),
                "GUIDE: text.title(label(\"{0}\"))".format(intl.loadstring("average_r2_line_chart_title")),
+               "SCALE: {0}".format(scale),
                "SCALE: linear(dim(2), include(0,1))",
                "ELEMENT: line(position(x*y), missing.wings())"]
         average_r2_chart.add_gpl_statement(gpl)
 
-        average_r2_chart.add_variable_mapping("x", alphas, graph_dataset)
-        average_r2_chart.add_variable_mapping("y", result["mean_r2"], graph_dataset)
+        average_r2_chart.add_variable_mapping("x", list(plotdata[:,1]), graph_dataset)
+        average_r2_chart.add_variable_mapping("y", list(plotdata[:,2]), graph_dataset)
 
         output_json.add_chart(average_r2_chart)
