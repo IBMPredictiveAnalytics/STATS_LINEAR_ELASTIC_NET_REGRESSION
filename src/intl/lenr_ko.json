@@ -1,7 +1,7 @@
 {
   "procedure.title": "선형 엘라스틱 넷 회귀",
   "procedure.description": "Python sklearn.linear_model을 사용하여 L1 및 L2 손실 패널티를 결합한 정규화된 선형 회귀 모델에 맞춥니다. 하나 이상의 독립 변수에 대한 종속 변수에 대한 ElasticNet 클래스이며 트레이스 플롯을 표시하고 교차 검증을 기반으로 L1 비율 및 알파 초매개변수 값을 선택하는 선택적 모드를 포함합니다.",
-  "best_model_summary": "최적 모형 요약",
+  "best_model_summary": "최적 모델 요약",
   "trace_results": "Elastic Net 추적 결과",
   "model_summary": "모델 요약",
   "dependent_variable": "종속변수: {0}",
@@ -21,7 +21,7 @@
   "footnotes_1": "추정을 위한 예측변수 표준화에 사용되는 값입니다. 종속 변수는 표준화되지 않습니다.",
   "footnotes_2": "추정 중에 절편에 페널티가 적용되지 않습니다.",
   "number_of_crossvalidation_folds": "교차 검증 중첩 수",
-  "model_comparisons": "모형 비교",
+  "model_comparisons": "모델 비교",
   "average_test_subset_r2": "평균 테스트 서브세트 R 제곱",
   "average_test_subset_mse": "평균 테스트 서브세트 MSE",
   "average_test_set_r2": "평균 테스트 서브세트 R 제곱",
