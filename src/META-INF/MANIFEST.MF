@@ -1,4 +1,4 @@
-Name: STATS_LINEAR_ELASTIC_NET_REGRESSION
+Name: lenr
 Display-Name: Linear Elastic Net Regression
 Dialog-Specs: dialogLENR.cfe
 Code-Files: lenr_wrapper.py
